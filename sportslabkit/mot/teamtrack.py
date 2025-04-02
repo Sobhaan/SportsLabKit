@@ -158,6 +158,7 @@ class TeamTracker(MultiObjectTracker):
                 "score": det.score,
                 "feature": det.feature,
                 "frame": self.frame_count,
+                "class_id": det.class_id,
             }
 
             # update the tracklet with the new state
@@ -173,6 +174,7 @@ class TeamTracker(MultiObjectTracker):
                     "score": det.score,
                     "frame": self.frame_count,
                     "feature": det.feature,
+                    "class_id": det.class_id,
                 }
                 new_tracklet = self.create_tracklet(new_state)
                 new_tracklets.append(new_tracklet)
@@ -205,6 +207,7 @@ class TeamTracker(MultiObjectTracker):
                 "score": det.score,
                 "feature": det.feature,
                 "frame": self.frame_count,
+                "class_id": det.class_id,
             }
 
             # update the tracklet with the new state
@@ -224,6 +227,7 @@ class TeamTracker(MultiObjectTracker):
                     "frame": self.frame_count,
                     "feature": tracklet.get_observation("feature"),
                     "pt": tracklet.get_state("pred_pt"),
+                    "class_id": tracklet.get_observation("class_id"),
                 }
                 tracklet = self.update_tracklet(tracklet, new_observation)
                 unassigned_tracklets_second.append(tracklet)
@@ -233,7 +237,7 @@ class TeamTracker(MultiObjectTracker):
 
     @property
     def required_observation_types(self):
-        return ["box", "frame", "score", "feature", "pt"]
+        return ["box", "frame", "score", "feature", "pt", "class_id"]
 
     @property
     def required_state_types(self):

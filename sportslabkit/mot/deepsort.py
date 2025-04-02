@@ -81,6 +81,7 @@ class DeepSORTTracker(MultiObjectTracker):
                 "score": detections[det_idx].score,
                 "frame": self.frame_count,
                 "feature": detections[det_idx].feature,
+                "class_id": detections[det_idx].class_id,
             }
 
             # update the tracklet with the new state
@@ -95,6 +96,7 @@ class DeepSORTTracker(MultiObjectTracker):
                     "score": det.score,
                     "frame": self.frame_count,
                     "feature": det.feature,
+                    "class_id": det.class_id,
                 }
                 new_tracklet = self.create_tracklet(new_observation)
                 new_tracklets.append(new_tracklet)
@@ -107,6 +109,7 @@ class DeepSORTTracker(MultiObjectTracker):
                     "score": tracklet.get_observation("score"),
                     "frame": self.frame_count,
                     "feature": tracklet.get_observation("feature"),
+                    "class_id": tracklet.get_observation("class_id"),
                 }
                 tracklet = self.update_tracklet(tracklet, new_observation)
                 unassigned_tracklets.append(tracklet)
@@ -115,7 +118,7 @@ class DeepSORTTracker(MultiObjectTracker):
 
     @property
     def required_observation_types(self):
-        return ["box", "score", "feature", "frame"]
+        return ["box", "score", "feature", "frame", "class_id"]
 
     @property
     def required_state_types(self):
