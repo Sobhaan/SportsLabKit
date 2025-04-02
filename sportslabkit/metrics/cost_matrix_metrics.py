@@ -63,8 +63,18 @@ class IoUCMM(BaseCostMatrixMetric):
             )
         else:
             bb1 = np.array([(t.box[0], t.box[1], t.box[0] + t.box[2], t.box[1] + t.box[3]) for t in trackers])
+
         bb2 = np.array([(d.box[0], d.box[1], d.box[0] + d.box[2], d.box[1] + d.box[3]) for d in detections])
-        return 1 - cdist(bb1, bb2, iou_score)
+        iou_matrix = 1 - cdist(bb1, bb2, iou_score)
+        # Apply class penalty
+        for i, tracker in enumerate(trackers):
+            # Skip if tracker doesn't have class_id yet
+            tracker_class = tracker._observations["class_id"][0]
+            for j, detection in enumerate(detections):
+                # If classes don't match, reduce the IoU score
+                if detection.class_id != tracker_class:
+                    iou_matrix[i, j] = 100000  # Apply penalty for different classes
+        return iou_matrix
 
 
 class EuclideanCMM(BaseCostMatrixMetric):

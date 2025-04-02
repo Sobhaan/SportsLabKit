@@ -63,22 +63,17 @@ class MotionVisualMatchingFunction(BaseMatchingFunction):
             return np.array([])
 
         # Compute motion cost
-        motion_cost = self.motion_metric(trackers, detections)
-        # print(motion_cost.mean(), motion_cost.std())
+        motion_cost = motion_metric_beta * self.motion_metric(trackers, detections)
 
         # Gate elements of motion cost matrix to infinity
         motion_cost[motion_cost > self.motion_metric_gate] = np.inf
 
         # Compute visual cost
-        visual_cost = self.visual_metric(trackers, detections)
-        # print(visual_cost.mean(),visual_cost.std())
+        visual_cost = visual_metric_beta * self.visual_metric(trackers, detections)
 
         # Gate elements of visual cost matrix to infinity
         visual_cost[visual_cost > self.visual_metric_gate] = np.inf
 
         # Compute total cost
-        inf_mask = (motion_cost == np.inf) | (visual_cost == np.inf)
-        cost_matrix = motion_metric_beta * motion_cost + visual_metric_beta * visual_cost
-
-        cost_matrix[inf_mask] = np.inf
+        cost_matrix = motion_cost + visual_cost
         return cost_matrix

@@ -279,7 +279,6 @@ class Tracklet:
                 data_dict[observation] = [1 for _ in frame_range]
 
         df = pd.DataFrame(data_dict)
-
         df = pd.DataFrame(df["box"].to_list(), columns=["bb_left", "bb_top", "bb_width", "bb_height"]).join(
             df.drop(columns=["box"])
         )

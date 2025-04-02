@@ -4,14 +4,13 @@ from sportslabkit.logger import logger
 from sportslabkit.motion_model.base import BaseMotionModel
 from sportslabkit.motion_model.models import ExponentialMovingAverage, KalmanFilter
 from sportslabkit.motion_model.tune import tune_motion_model
-from sportslabkit.motion_model.groupcast import GCLinear
+
 
 __all__ = [
     "tune_motion_model",
     "ExponentialMovingAverage",
     "KalmanFilter",
     "BaseMotionModel",
-    "GCLinear"
 ]
 
 

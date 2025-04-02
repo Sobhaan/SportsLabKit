@@ -47,6 +47,7 @@ class SORTTracker(MultiObjectTracker):
     def update(self, current_frame, tracklets):
         # detect objects using the detection model
         detections = self.detection_model(current_frame)
+        # Add this to your update method after getting detections
 
         # update the motion model with the new detections
         # self.update_tracklets_with_motion_model_predictions
@@ -59,7 +60,7 @@ class SORTTracker(MultiObjectTracker):
 
         # Use predicted tracklets to match with detections since the order is the same
         matches, cost_matrix = self.matching_fn(tracklets, detections, return_cost_matrix=True)
-
+        
         assigned_tracklets = []
         new_tracklets = []
         unassigned_tracklets = []
@@ -76,6 +77,7 @@ class SORTTracker(MultiObjectTracker):
                 "box": detections[det_idx].box,
                 "score": detections[det_idx].score,
                 "frame": self.frame_count,
+                "class_id": detections[det_idx].class_id,
             }
 
             # update the tracklet with the new state
@@ -89,6 +91,7 @@ class SORTTracker(MultiObjectTracker):
                     "box": det.box,
                     "score": det.score,
                     "frame": self.frame_count,
+                    "class_id": det.class_id,
                 }
                 new_tracklet = self.create_tracklet(new_observation)
                 new_tracklets.append(new_tracklet)
@@ -100,6 +103,7 @@ class SORTTracker(MultiObjectTracker):
                     "box": tracklet.get_state("pred_box"),
                     "score": tracklet.get_observation("score"),
                     "frame": self.frame_count,
+                    "class_id": tracklet.get_observation("class_id"),
                 }
                 tracklet = self.update_tracklet(tracklet, new_observation)
                 unassigned_tracklets.append(tracklet)
@@ -108,7 +112,7 @@ class SORTTracker(MultiObjectTracker):
 
     @property
     def required_observation_types(self):
-        return ["box", "frame", "score"]
+        return ["box", "frame", "score", "class_id"]
 
     @property
     def required_state_types(self):
