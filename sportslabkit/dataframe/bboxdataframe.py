@@ -16,6 +16,8 @@ from ..logger import logger
 from ..utils import MovieIterator, get_fps
 from .base import BaseSLKDataFrame
 from .coordinatesdataframe import CoordinatesDataFrame
+from IPython.display import display
+from typing import Any, Dict, List, Optional, Union # Added Dict, List, Optional, Union
 
 
 # https://clrs.cc/
@@ -170,13 +172,201 @@ class BBoxDataFrame(BaseSLKDataFrame):
 
         make_video(generator(), save_path, input_framerate=input_framerate, **kwargs)
 
-    def to_yolo_format(self):
-        """Convert a dataframe to the YOLO format.
+    def to_yolov8_results(
+        self,
+        include_confidence: bool = True,
+        include_class_id: bool = False,
+        class_mapping: Optional[Dict[str, Dict[Any, Any]]] = None,
+        na_class_id: int = 0,
+    ) -> Dict[int, Dict[str, np.ndarray]]:
+        """Convert DataFrame to a YOLOv8 Results dictionary format.
+
+        Generates a dictionary where keys are frame indices and values are
+        dictionaries containing bounding boxes (xyxy format), track IDs,
+        and optionally confidence scores and class IDs.
+
+        Output Format per frame:
+        {
+            'boxes_xyxy': ndarray(N, 4) -> [xmin, ymin, xmax, ymax],
+            'track_ids': ndarray(N,) -> [track_id_1, ...],
+            'confidences': ndarray(N,) -> [conf_1, ...] (Optional),
+            'class_ids': ndarray(N,) -> [class_id_1, ...] (Optional)
+        }
+        Coordinates are absolute pixel values. Track IDs are generated based
+        on unique (TeamID, PlayerID) pairs.
+
+        Args:
+            include_confidence (bool): Whether to include confidence scores
+                                       (requires 'conf' column). Defaults to True.
+            include_class_id (bool): Whether to include class IDs. Requires
+                                     either a mapping or default behavior.
+                                     Defaults to False.
+            class_mapping (Optional[Dict[str, Dict[Any, Any]]]):
+                                     Mappings from 'TeamID' and 'PlayerID' to
+                                     class_id. Used only if include_class_id is True.
+                                     Should map string representations of IDs.
+                                     Defaults to None (uses default player=0/ball=1 mapping).
+            na_class_id (int): Class ID for NaN values if mapping is used.
+                               Defaults to 0 (usually 'player').
 
         Returns:
-            pd.DataFrame: Dataframe in YOLO format.
+            Dict[int, Dict[str, np.ndarray]]: Dictionary mapping frame index
+                                              to detection/tracking data.
+
+        Raises:
+            ValueError: If required columns (frame, bb_left, bb_top,
+                        bb_width, bb_height, TeamID, PlayerID) are missing,
+                        or if 'conf' is missing when include_confidence is True.
         """
-        raise NotImplementedError
+        # Define required columns based on usage
+        required_base_cols = ['frame', 'bb_left', 'bb_top', 'bb_width', 'bb_height', 'TeamID', 'PlayerID']
+        current_required = list(required_base_cols) # Start with base requirements
+        optional_output_cols = [] # Keep track of optional cols we WILL include
+
+        if include_confidence:
+            current_required.append('conf')
+            optional_output_cols.append('confidences')
+        if include_class_id:
+            # Class ID is derived, not strictly required in input unless pre-calculated
+            optional_output_cols.append('class_ids')
+
+
+        # --- Get Data & Check Columns ---
+        try:
+            # Ensure dropna=True to avoid issues with missing values in required columns
+            long_df = self.to_long_df(dropna=True).reset_index()
+            logger.debug(f"Long DataFrame created with columns: {long_df.columns.tolist()}")
+        except Exception as e:
+             logger.error(f"Failed to convert DataFrame to long format. Error: {e}", exc_info=True)
+             raise ValueError(f"Failed to convert DataFrame to long format. Check source data. Error: {e}")
+
+        missing_cols = [col for col in current_required if col not in long_df.columns]
+        if missing_cols:
+            # If 'conf' is missing but requested, raise error. Other base cols should exist.
+             if 'conf' in missing_cols and include_confidence:
+                 raise ValueError(f"DataFrame (after to_long_df) is missing required column 'conf' needed for confidences.")
+             elif any(col in missing_cols for col in required_base_cols):
+                 raise ValueError(f"DataFrame (after to_long_df) is missing required base columns: {missing_cols}")
+             else: # Should not happen if base cols check passes
+                  logger.warning(f"Unexpected missing columns detected: {missing_cols}")
+
+
+        if long_df.empty:
+             logger.warning("Input DataFrame is empty after to_long_df(dropna=True). Returning empty dictionary.")
+             return {}
+
+        # --- Generate Consistent Track IDs (adapted from to_mot_format) ---
+        # Cast TeamID/PlayerID to string to handle potential mixed types and ensure hashability
+        try:
+            long_df['TeamID_str'] = long_df['TeamID'].astype(str)
+            long_df['PlayerID_str'] = long_df['PlayerID'].astype(str)
+        except KeyError as e:
+             raise ValueError(f"Missing 'TeamID' or 'PlayerID' column needed for generating track IDs. Error: {e}")
+
+        # Create tuples for mapping keys
+        long_df['id_tuple'] = list(zip(long_df['TeamID_str'], long_df['PlayerID_str']))
+        # Get unique tuples and create mapping
+        unique_tuples = long_df['id_tuple'].unique()
+        id_map = {tuple_key: i for i, tuple_key in enumerate(unique_tuples)}
+        logger.debug(f"Generated track ID map (first 5): {dict(list(id_map.items())[:5])}...")
+
+        # Apply the mapping to create the 'track_id' column
+        long_df['track_id'] = long_df['id_tuple'].map(id_map)
+        long_df.drop(columns=['TeamID_str', 'PlayerID_str', 'id_tuple'], inplace=True) # Clean up intermediate cols
+
+
+        # --- Generate Class IDs (Optional, adapted from to_yolov5_format) ---
+        if include_class_id:
+             logger.debug("Including class IDs.")
+             if class_mapping is None:
+                 # Default mapping: TeamID '3' is class 1 (ball), others are class 0 (player)
+                 # IMPORTANT: Assumes '3' is the string representation for the Ball's TeamID
+                 class_mapping = {"TeamID": {"3": 1}, "PlayerID": {}}
+                 logger.debug("Using default class mapping: Ball (TeamID '3') = 1, Players = 0")
+
+             # Ensure mapping keys/values are strings if needed, apply carefully
+             # Use string versions of TeamID/PlayerID for mapping lookup
+             team_map_str = {str(k): v for k, v in class_mapping.get("TeamID", {}).items()}
+             player_map_str = {str(k): v for k, v in class_mapping.get("PlayerID", {}).items()}
+
+             mapped_teams = long_df['TeamID'].astype(str).map(team_map_str)
+             mapped_players = long_df['PlayerID'].astype(str).map(player_map_str)
+
+             # Combine: Player mapping takes precedence over Team mapping
+             # Default to na_class_id (0) if neither maps
+             long_df['class_id'] = mapped_players.combine_first(mapped_teams).fillna(na_class_id).astype(int)
+             logger.debug(f"Generated class IDs. Example values: {long_df['class_id'].unique()}")
+
+
+        # --- Prepare Output Structure ---
+        results_dict: Dict[int, Dict[str, np.ndarray]] = {}
+        # Ensure frame IDs are integers for dictionary keys and range calculation
+        long_df['frame'] = long_df['frame'].astype(int)
+        min_frame = long_df['frame'].min()
+        max_frame = long_df['frame'].max()
+        logger.info(f"Processing frames from {min_frame} to {max_frame}")
+
+        # --- Group by Frame and Process ---
+        groups = long_df.groupby("frame")
+        all_present_frames = set(groups.groups.keys()) # Keys are frame numbers
+
+        for frame_num in range(min_frame, max_frame + 1):
+             # Check if this frame had any detections after dropna
+             if frame_num not in all_present_frames:
+                # Add entry for empty frame
+                frame_data: Dict[str, np.ndarray] = {
+                    'boxes_xyxy': np.empty((0, 4), dtype=np.float32),
+                    'track_ids': np.empty((0,), dtype=int)
+                }
+                if 'confidences' in optional_output_cols:
+                    frame_data['confidences'] = np.empty((0,), dtype=np.float32)
+                if 'class_ids' in optional_output_cols:
+                     frame_data['class_ids'] = np.empty((0,), dtype=int)
+                results_dict[frame_num] = frame_data
+                continue
+
+             # --- Frame has detections ---
+             group = groups.get_group(frame_num)
+
+             # Extract bounding box data [left, top, width, height]
+             # Ensure data is numeric before calculations
+             try:
+                 bboxes_ltwh = group[['bb_left', 'bb_top', 'bb_width', 'bb_height']].values.astype(float)
+             except ValueError as e:
+                 logger.error(f"Frame {frame_num}: Could not convert bbox columns to float. Check data. Error: {e}")
+                 # Skip frame or handle error appropriately
+                 continue # Skip this frame
+
+             # Convert to [xmin, ymin, xmax, ymax]
+             xmin = bboxes_ltwh[:, 0]
+             ymin = bboxes_ltwh[:, 1]
+             xmax = xmin + bboxes_ltwh[:, 2]
+             ymax = ymin + bboxes_ltwh[:, 3]
+             boxes_xyxy = np.stack([xmin, ymin, xmax, ymax], axis=-1)
+
+             # Extract track IDs
+             track_ids = 1000 # Use the generated track_id
+
+             # --- Store results for this frame ---
+             frame_data: Dict[str, np.ndarray] = {
+                'boxes_xyxy': boxes_xyxy.astype(np.float32),
+                'track_ids': track_ids
+             }
+
+             # Add optional data
+             if 'confidences' in optional_output_cols:
+                 try:
+                     frame_data['confidences'] = group['conf'].values.astype(np.float32)
+                 except ValueError as e:
+                     logger.error(f"Frame {frame_num}: Could not convert 'conf' column to float. Error: {e}")
+                     frame_data['confidences'] = np.full(len(track_ids), np.nan, dtype=np.float32) # Fill with NaN
+             if 'class_ids' in optional_output_cols:
+                  frame_data['class_ids'] = group['class_id'].values.astype(int) # Already calculated
+
+             results_dict[frame_num] = frame_data
+
+        logger.info(f"Finished processing. Returning results for {len(results_dict)} frames.")
+        return results_dict
 
     def to_yolov5_format(
         self,
@@ -211,7 +401,6 @@ class BBoxDataFrame(BaseSLKDataFrame):
             save_dir.mkdir(parents=True, exist_ok=True)
 
         df = self.to_long_df().reset_index()
-
         if mapping is None:
             mapping = {"TeamID": {"3": 1}, "PlayerID": {}}
 
@@ -226,7 +415,8 @@ class BBoxDataFrame(BaseSLKDataFrame):
         groups = df.groupby("frame")
         for frame_num, group in groups:
             vals = group[["class", "x", "y", "bb_width", "bb_height"]].values
-            vals /= np.array([1, w, h, w, h])
+            w, h = group[["bb_width", "bb_height"]].values[0]
+            vals = (vals / np.array([1, w, h, w, h]))
 
             return_values.append(vals)
 
